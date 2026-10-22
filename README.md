@@ -48,7 +48,7 @@ Manual check: Actions → **Track Ollama releases** → **Run workflow**.
 `.github/workflows/release.yml` cuts a GitHub Release automatically whenever
 a merge to `main` changes the add-on `version:` in
 `ollama_notimeout/config.yaml` — so merging a tracker bump PR (or any manual
-version bump) tags `v<version>` and publishes the matching `CHANGELOG.md`
+version bump) tags `<version>` and publishes the matching `CHANGELOG.md`
 section as the release notes. It's idempotent: an already-tagged version is
 skipped, so re-runs and unrelated pushes do nothing. This needs *Settings →
 Actions → General → Workflow permissions* set to **Read and write** (the same
