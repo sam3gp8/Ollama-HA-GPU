@@ -1,0 +1,78 @@
+---
+name: "Ollama (No-Timeout GPU)"
+version: "1.1.4"
+slug: ollama_notimeout
+description: >-
+  Local Ollama server tuned to never time out loading/unloading models
+  regardless of size, with GPU device passthrough for custom HAOS builds.
+url: "https://github.com/sam3gp8/Ollama-HA-GPU/tree/main/ollama_notimeout"
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+
+# Deliberately no `watchdog:` and no `image:` healthcheck field.
+# Supervisor will restart/kill the container if a watchdog probe fails
+# while a 70B+ model is still mmap'ing into RAM/VRAM. Leave it unset.
+
+# Container start/stop grace in seconds (default is only 10). This is the
+# real knob for graceful shutdown — s6-rc waits indefinitely for ollama to
+# exit on SIGTERM, so this outer Docker-level timeout is what decides when
+# a stop becomes a SIGKILL.
+timeout: 120
+
+host_network: false
+ingress: false          # see README — ingress proxy has its own timeout,
+                         # use the mapped port directly for anything long-running
+panel_icon: mdi:brain
+
+ports:
+  11434/tcp: 11434
+ports_description:
+  11434/tcp: "Ollama API — call this directly, do not proxy through ingress for pulls/generates"
+
+# Generic device passthrough — edit to match whatever your patched
+# Supervisor/OS exposes. /dev/dri covers Intel/AMD VAAPI+ROCm nodes,
+# /dev/kfd is AMD ROCm compute, add /dev/nvidia* devices if your build
+# maps those through instead. Current App schema takes host paths only
+# (no dest:mode suffix — that's the pre-2026.04 add-on format).
+devices:
+  - /dev/dri
+  - /dev/kfd
+
+full_access: false
+
+map:
+  - type: addon_config
+    read_only: false
+  - type: share
+    read_only: false
+
+# No backup_exclude here: that key only filters the app's own backup
+# (which contains /data), and models live in /share — a separate backup
+# component entirely. See README for accurate backup guidance.
+
+options:
+  keep_alive: "-1"
+  num_parallel: 1
+  max_loaded_models: 1
+  max_queue: 512
+  context_length: 4096
+  flash_attention_mode: "auto"
+  kv_cache_type: "default"
+  gpu_devices: ""
+  extra_env: {}
+
+schema:
+  keep_alive: "str"
+  num_parallel: "int(1,8)"
+  max_loaded_models: "int(1,4)"
+  max_queue: "int(1,4096)"
+  context_length: "int(512,131072)"
+  flash_attention_mode: "list(auto|on|off)"
+  kv_cache_type: "list(default|f16|q8_0|q4_0)"
+  gpu_devices: "str?"
+  extra_env:
+    "str?": "str?"

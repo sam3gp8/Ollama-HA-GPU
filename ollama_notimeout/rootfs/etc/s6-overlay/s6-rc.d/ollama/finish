@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Runs when ollama serve exits, for any reason.
+#
+# s6-supervise calls ./finish with:
+#   $1 = run's exit code, OR 256 if run was killed by a signal
+#   $2 = the signal number when $1 is 256 (undefined otherwise)
+# (This is s6 semantics — NOT the shell's 128+signal convention, so an
+# OOM SIGKILL arrives here as $1=256 $2=9, not $1=137.)
+# ==============================================================================
+exit_code="${1:-unknown}"
+signal="${2:-}"
+
+if [ "${exit_code}" = "256" ] && [ "${signal}" = "9" ]; then
+    echo "[ollama] ERROR: killed by SIGKILL — almost always the kernel OOM" \
+        "killer. Check 'dmesg | grep -i oom' on the host. This is a real" \
+        "memory limit, not a Supervisor timeout — reduce max_loaded_models" \
+        "or quantization, or add swap/increase VRAM." >&2
+elif [ "${exit_code}" = "256" ]; then
+    echo "[ollama] WARNING: killed by signal ${signal}" >&2
+else
+    echo "[ollama] WARNING: exited with code ${exit_code}" >&2
+fi

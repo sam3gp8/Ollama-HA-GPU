@@ -1,0 +1,28 @@
+configuration:
+  keep_alive:
+    name: Keep alive
+    description: "How long a loaded model stays resident. '-1' = forever (recommended to avoid reload timeouts on repeat calls)."
+  num_parallel:
+    name: Parallel requests
+    description: Number of parallel inference requests per loaded model.
+  max_loaded_models:
+    name: Max loaded models
+    description: Maximum number of models resident in memory simultaneously.
+  max_queue:
+    name: Max queue
+    description: Requests queued instead of rejected while busy/loading.
+  context_length:
+    name: Context length
+    description: Default context window in tokens.
+  flash_attention_mode:
+    name: Flash attention
+    description: "'auto' (recommended) lets Ollama decide per model/hardware. 'on' forces it (required for KV cache quantization). 'off' force-disables — will be overridden to on if kv_cache_type is quantized, since llama.cpp refuses that combination. Replaces the old boolean flash_attention option; the stored legacy value is discarded with a Supervisor warning on update."
+  kv_cache_type:
+    name: KV cache quantization
+    description: "'default' = f16 full precision. 'q8_0' halves KV cache VRAM with negligible quality loss (recommended for large models on 24GB cards); 'q4_0' quarters it with some quality loss. Quantized values require flash attention — the app enforces this automatically."
+  gpu_devices:
+    name: GPU device selector (AMD/ROCm only)
+    description: "Numeric ROCm device indices for ROCR_VISIBLE_DEVICES (e.g. '0'). LEAVE BLANK for NVIDIA — injection exposes all GPUs by default; to pin NVIDIA devices use extra_env with CUDA_VISIBLE_DEVICES instead. Names like '4090' break discovery."
+  extra_env:
+    name: Extra environment variables
+    description: Free-form key/value overrides applied after all other settings, e.g. for CUDA_VISIBLE_DEVICES on your specific passthrough setup.
