@@ -11,7 +11,6 @@ arch:
   - aarch64
 init: false
 startup: services
-boot: auto
 
 # Deliberately no `watchdog:` and no `image:` healthcheck field.
 # Supervisor will restart/kill the container if a watchdog probe fails
@@ -23,9 +22,10 @@ boot: auto
 # a stop becomes a SIGKILL.
 timeout: 120
 
-host_network: false
-ingress: false          # see README — ingress proxy has its own timeout,
-                         # use the mapped port directly for anything long-running
+# host_network and ingress are deliberately left unset (both default to
+# false). ingress in particular: the ingress proxy has its own timeout you
+# don't control here, so call the mapped 11434 port directly for anything
+# long-running (pulls/generates). See README.
 panel_icon: mdi:brain
 
 ports:
@@ -41,8 +41,6 @@ ports_description:
 devices:
   - /dev/dri
   - /dev/kfd
-
-full_access: false
 
 map:
   - type: addon_config
