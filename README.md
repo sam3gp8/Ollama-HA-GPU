@@ -43,6 +43,18 @@ reaches the live appliance until you merge and the device refreshes its store.
 
 Manual check: Actions → **Track Ollama releases** → **Run workflow**.
 
+## Releases
+
+`.github/workflows/release.yml` cuts a GitHub Release automatically whenever
+a merge to `main` changes the add-on `version:` in
+`ollama_notimeout/config.yaml` — so merging a tracker bump PR (or any manual
+version bump) tags `v<version>` and publishes the matching `CHANGELOG.md`
+section as the release notes. It's idempotent: an already-tagged version is
+skipped, so re-runs and unrelated pushes do nothing. This needs *Settings →
+Actions → General → Workflow permissions* set to **Read and write** (the same
+setting the tracker needs). To backfill the current version, run it manually:
+Actions → **Release** → **Run workflow**.
+
 ## Install as a repository (recommended)
 
 Settings → Apps → App Store → ⋮ → Repositories → add:

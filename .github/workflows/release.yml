@@ -1,0 +1,113 @@
+---
+name: Release
+
+# Cut a GitHub Release automatically when a merge to main changes the add-on
+# version in config.yaml — e.g. when a `track-ollama.yml` bump PR is merged,
+# or any manual version bump lands.
+#
+# The release tag is `v<version>` and its body is the matching CHANGELOG.md
+# section. The job is idempotent: it skips when the tag already exists, so a
+# re-run, a config.yaml change that doesn't touch `version:`, or a manual
+# dispatch on an already-released version all no-op instead of erroring.
+#
+# Manual backfill: Actions → Release → Run workflow creates the release for
+# whatever version config.yaml currently pins, if it isn't tagged yet.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ollama_notimeout/config.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need tags to test for an existing release
+
+      - name: Read add-on version
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -oP '^version:\s*"\K[0-9]+\.[0-9]+\.[0-9]+(?=")' \
+              ollama_notimeout/config.yaml || true)"
+          if [ -z "${VERSION}" ]; then
+            echo "ERROR: could not parse version from ollama_notimeout/config.yaml" >&2
+            exit 1
+          fi
+          echo "Add-on version: ${VERSION}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check whether the tag already exists
+        id: exists
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists — nothing to release."
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Tag ${TAG} is new — will create a release."
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Extract the CHANGELOG section
+        if: steps.exists.outputs.exists == 'false'
+        id: notes
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          CHANGELOG=ollama_notimeout/CHANGELOG.md
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+
+          # Capture lines from the "## <version>" heading up to (but not
+          # including) the next "## " heading. Match the version literally so
+          # the dots aren't treated as regex wildcards.
+          : > "${NOTES_FILE}"
+          if [ -f "${CHANGELOG}" ]; then
+            awk -v ver="${VERSION}" '
+              index($0, "## " ver) == 1 {
+                rest = substr($0, length("## " ver) + 1)
+                # heading matches only if the version is the whole token
+                # (end of line, or followed by a space / em dash separator)
+                if (rest == "" || rest ~ /^[ \t]/ || rest ~ /^ *—/) {
+                  capture = 1; print; next
+                }
+              }
+              capture && /^## / { exit }
+              capture { print }
+            ' "${CHANGELOG}" > "${NOTES_FILE}"
+          fi
+
+          if [ ! -s "${NOTES_FILE}" ]; then
+            echo "No CHANGELOG entry found for ${VERSION}; using a minimal body." >&2
+            printf '## %s\n\nRelease %s.\n' "${VERSION}" "${VERSION}" > "${NOTES_FILE}"
+          fi
+
+          echo "notes_file=${NOTES_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "----- release notes -----"
+          cat "${NOTES_FILE}"
+
+      - name: Create the release
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          gh release create "${TAG}" \
+            --title "Ollama (No-Timeout GPU) ${VERSION}" \
+            --notes-file "${NOTES_FILE}" \
+            --target "${GITHUB_SHA}"
