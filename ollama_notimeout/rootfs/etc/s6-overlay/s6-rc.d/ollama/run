@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Ollama service runner (s6-rc v3 longrun)
+# ==============================================================================
+set -euo pipefail
+
+OPTIONS=/data/options.json
+
+# Null-aware option reader. NOTE: jq's `//` alternative operator treats
+# boolean false the same as null, so a `.some_bool // "default"` lookup would
+# silently discard an explicit false. This helper only substitutes the
+# default when the key is null/absent — and also when jq itself fails
+# (missing/corrupt options.json), because a swallowed jq error would
+# otherwise export every OLLAMA_* var as an empty string, silently
+# reverting keep_alive/load_timeout to Ollama's 5m defaults.
+json_or() {
+    local val
+    if ! val=$(jq -r "$1" "${OPTIONS}" 2>/dev/null); then
+        printf '%s' "$2"
+        return 0
+    fi
+    if [ "${val}" = "null" ] || [ -z "${val}" ]; then
+        printf '%s' "$2"
+    else
+        printf '%s' "${val}"
+    fi
+}
+
+if [ ! -f "${OPTIONS}" ]; then
+    echo "[ollama] WARNING: ${OPTIONS} not found — starting with built-in defaults" >&2
+fi
+
+export OLLAMA_KEEP_ALIVE="$(json_or '.keep_alive' '-1')"
+export OLLAMA_NUM_PARALLEL="$(json_or '.num_parallel' '1')"
+export OLLAMA_MAX_LOADED_MODELS="$(json_or '.max_loaded_models' '1')"
+export OLLAMA_MAX_QUEUE="$(json_or '.max_queue' '512')"
+export OLLAMA_CONTEXT_LENGTH="$(json_or '.context_length' '4096')"
+export OLLAMA_LOAD_TIMEOUT=0
+
+# Tri-state per official FAQ: unset = Ollama decides per model/hardware
+# (FA is architecture-gated), 1 = force on, 0 = force off.
+FLASH_ATTN="$(json_or '.flash_attention_mode' 'auto')"
+case "${FLASH_ATTN}" in
+    on|true|1)   export OLLAMA_FLASH_ATTENTION=1 ;;
+    off|false|0) export OLLAMA_FLASH_ATTENTION=0 ;;
+    *)           : ;;  # auto — leave unset
+esac
+
+KV_TYPE="$(json_or '.kv_cache_type' 'default')"
+if [ "${KV_TYPE}" != "default" ]; then
+    export OLLAMA_KV_CACHE_TYPE="${KV_TYPE}"
+fi
+
+GPU_DEVICES="$(json_or '.gpu_devices' '')"
+if [ -n "${GPU_DEVICES}" ]; then
+    # e.g. CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES
+    # depending on what your patched Supervisor exposes — change the var
+    # name here for your runtime, or set it via the extra_env option
+    # instead without touching this script.
+    export ROCR_VISIBLE_DEVICES="${GPU_DEVICES}"
+fi
+
+# Apply any free-form overrides last so they can win over the above.
+if jq -e '(.extra_env // {}) | length > 0' "${OPTIONS}" >/dev/null 2>&1; then
+    while IFS='=' read -r key value; do
+        [ -z "${key}" ] && continue
+        export "${key}=${value}"
+        echo "[ollama] extra_env: ${key} set"
+    done < <(jq -r '(.extra_env // {}) | to_entries[] | "\(.key)=\(.value)"' "${OPTIONS}")
+fi
+
+mkdir -p "${OLLAMA_MODELS:-/share/ollama/models}" "${OLLAMA_TMPDIR:-/share/ollama/tmp}"
+
+# --- Post-flight compatibility guard (runs AFTER extra_env so it covers
+# both the app options and any free-form overrides) ---
+# llama.cpp hard-fails model load with "V cache quantization requires
+# flash_attn" when a quantized KV cache is combined with FA disabled.
+# Official Ollama FAQ: cache quantization only takes effect with FA
+# enabled. Rather than let the server 500 at load time, force FA on and
+# say so loudly.
+case "${OLLAMA_KV_CACHE_TYPE:-}" in
+    q*)
+        case "${OLLAMA_FLASH_ATTENTION:-}" in
+            1|true) : ;;  # already explicitly on — valid combo
+            *)
+                echo "[ollama] WARNING: OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE} requires flash attention (llama.cpp constraint) — forcing OLLAMA_FLASH_ATTENTION=1. Set flash_attention_mode=on in the app config to silence this, or kv_cache_type=default to drop quantization."
+                export OLLAMA_FLASH_ATTENTION=1
+                ;;
+        esac
+        ;;
+esac
+
+echo "[ollama] Starting — keep_alive=${OLLAMA_KEEP_ALIVE} load_timeout=infinite max_loaded_models=${OLLAMA_MAX_LOADED_MODELS} flash_attention=${OLLAMA_FLASH_ATTENTION:-auto} kv_cache_type=${OLLAMA_KV_CACHE_TYPE:-f16(default)}"
+
+# exec, not backgrounded — s6 must own this PID directly so SIGTERM
+# reaches ollama itself and the finish script sees its real exit status.
+exec /usr/bin/ollama serve

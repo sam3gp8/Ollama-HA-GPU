@@ -1,0 +1,81 @@
+---
+name: Track Ollama releases
+
+# Decoupling: this add-on follows Ollama's cadence (new release every few
+# days), independent of the HAOS OS image, which only rebuilds when a new
+# HAOS version ships. This workflow checks daily and opens a PR when a newer
+# stable Ollama exists AND its release assets actually resolve.
+#
+# It opens a PR rather than pushing to main on purpose: a new Ollama runner
+# can change llama.cpp/CUDA behavior (the cuda_v13 PTX-JIT path on the 4090
+# is the known example), so the bump gets a human review gate before it
+# lands on the branch the live appliance installs from.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # 06:17 UTC daily (off-the-hour to avoid cron congestion)
+  workflow_dispatch:        # allow manual "check now"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for newer Ollama and apply bump
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/check-ollama-version.sh
+
+      - name: Open pull request
+        if: steps.check.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.check.outputs.latest }}
+          CURRENT: ${{ steps.check.outputs.current }}
+          ADDON_VERSION: ${{ steps.check.outputs.addon_version }}
+        run: |
+          set -euo pipefail
+          BRANCH="auto/ollama-${LATEST}"
+
+          # If a PR branch for this version already exists, don't duplicate.
+          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
+            echo "Branch ${BRANCH} already exists; skipping."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "${BRANCH}"
+          git add ollama_notimeout/Dockerfile ollama_notimeout/config.yaml ollama_notimeout/CHANGELOG.md
+          git commit -m "ollama_notimeout: bump Ollama ${CURRENT} -> ${LATEST} (add-on ${ADDON_VERSION})"
+          git push -u origin "${BRANCH}"
+
+          gh pr create \
+            --title "Ollama ${CURRENT} → ${LATEST} (add-on ${ADDON_VERSION})" \
+            --body "$(cat <<EOF
+          Automated by \`track-ollama.yml\`.
+
+          - **Ollama**: \`${CURRENT}\` → \`${LATEST}\`
+          - **Add-on version**: \`${ADDON_VERSION}\`
+          - Release assets for amd64 and arm64 were verified present before this bump.
+
+          ## Review checklist before merge
+          - [ ] Skim Ollama's release notes for runner / llama.cpp / CUDA changes.
+          - [ ] Rebuild the add-on and load gemma4:26b on the 4090 (q8_0 KV, flash attn on).
+          - [ ] Confirm warmup completes — i.e. the cuda_v13 PTX-JIT path is still satisfied
+                by the host image's driver libraries.
+
+          Merging updates the add-on in the store repo; HAOS devices offer the update on their
+          next store refresh. Nothing installs automatically.
+          EOF
+          )" \
+            --base main \
+            --head "${BRANCH}"
