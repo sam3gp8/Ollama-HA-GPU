@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.6 — Ollama 0.40.12 (auto-tracked 2026-10-28)
+- Bumped bundled Ollama to v0.40.12 (was v0.40.8), tracked
+  automatically from upstream stable releases. Release assets for
+  amd64 and arm64 were verified present before this bump.
+- NOTE: a new Ollama runner can change llama.cpp/CUDA behavior
+  (e.g. the cuda_v13 PTX-JIT path). Test gemma4:26b load on the
+  4090 before relying on this in production.
+
 ## 1.1.5 — Ollama 0.40.8 (auto-tracked 2026-10-22)
 - Bumped bundled Ollama to v0.40.8 (was v0.31.1), tracked
   automatically from upstream stable releases. Release assets for
